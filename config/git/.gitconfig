@@ -1,0 +1,33 @@
+# ── dotfiles .gitconfig ───────────────────────────────────────
+# Symlinked via install.sh
+#
+# TIP: set your user info locally per-repo with:
+#   git config user.name "Your Name"
+#   git config user.email "you@example.com"
+
+[color]
+  ui = auto
+
+[init]
+  defaultBranch = main
+
+[core]
+  editor = vim
+  excludesFile = ~/.gitignore_global
+
+[alias]
+  lg      = log --oneline --graph --decorate --all
+  st      = status -sb
+  co      = checkout
+  cb      = checkout -b
+  ci      = commit
+  ca      = commit --amend
+  unstage = reset HEAD --
+  last    = log -1 HEAD
+  br      = branch --format='%(HEAD) %(color:green)%(refname:short)%(color:reset) - %(contents:subject)'
+  df      = diff
+  dc      = diff --cached
+  cleanup = !git remote prune origin && git gc --auto
+[safe]
+	directory = %(prefix)///wsl.localhost/Ubuntu/home/adunner/github/AdamDunn1437/dotfiles
+	directory = %(prefix)///wsl.localhost/Ubuntu/home/adunner/github/AdamDunn1437/dotfiles

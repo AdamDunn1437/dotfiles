@@ -1,0 +1,24 @@
+# ── Editor / IDE ──
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+*.sublime-*
+
+# ── OS cruft ──
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ── Nix ──
+result
+result-*
+.direnv/
+
+# ── Python ──
+__pycache__/
+*.pyc
+
+# ── Rust (if cargo is used) ──
+/target/

@@ -1,0 +1,16 @@
+# ── dotfiles global gitignore ──────────────────────────────────
+# Applied to every repo via core.excludesFile
+
+# Editor swap files
+*.swp
+*.swo
+*~
+
+# OS junk
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE
+.vscode/
+.idea/

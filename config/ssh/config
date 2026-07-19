@@ -1,0 +1,11 @@
+# ── dotfiles ssh/config ────────────────────────────────────────
+# Symlinked to ~/.ssh/config via install.sh
+#
+# Uncomment and adapt for your hosts.
+#
+# Host example
+#   HostName example.com
+#   User myuser
+#   Port 22
+#   IdentityFile ~/.ssh/id_ed25519
+#   ForwardAgent yes

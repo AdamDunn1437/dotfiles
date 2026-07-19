@@ -1,0 +1,47 @@
+{
+  description = "Personal dotfiles — Nix dev shell + symlink installer";
+
+  inputs = {
+    nixpkgs.url = "github:nixos/nixpkgs/nixpkgs";
+    flake-utils.url = "github:numtide/flake-utils";
+  };
+
+  outputs = { self, nixpkgs, flake-utils }:
+    flake-utils.lib.eachDefaultSystem (system:
+      let
+        pkgs = import nixpkgs {
+          inherit system;
+          config.allowUnfree = true;
+        };
+      in
+      {
+        devShells.default = pkgs.mkShell {
+          name = "dotfiles-dev";
+
+          packages = with pkgs; [
+            git
+            zsh
+            neovim
+            tmux
+            starship
+            fzf
+            ripgrep
+            fd
+          ];
+
+          shellHook = ''
+            echo "✦ dotfiles dev shell activated"
+            echo "  git:      $(git --version 2>/dev/null)"
+            echo "  zsh:      $(zsh --version 2>/dev/null)"
+            echo "  nvim:     $(nvim --version 2>/dev/null | head -1)"
+            echo "  tmux:     $(tmux -V 2>/dev/null)"
+            echo "  starship: $(starship --version 2>/dev/null | head -1)"
+            echo "  fzf:      $(fzf --version 2>/dev/null)"
+            echo "  rg:       $(rg --version 2>/dev/null | head -1)"
+            echo "  fd:       $(fd --version 2>/dev/null)"
+            echo ""
+            echo "Run ./install.sh to symlink config files into \$HOME"
+          '';
+        };
+      });
+}
