@@ -1,305 +1,437 @@
 # Development Setup Cheat Sheet
 
-Personal dev-environment for WSL2 (Ubuntu) using **Nix** (reproducible tooling),
-**home-manager** (shell-heavy configs), and a plain **install.sh** (symlink-based
-configs). Everything lives in `~/github/AdamDunn1437/dotfiles` and is versioned in git.
+Personal dev environment for WSL2 (Ubuntu) using **Nix** (pinned tools), **home-manager**
+(zsh, starship, wezterm) and a plain **install.sh** (symlinked configs). Everything lives in
+`~/github/AdamDunn1437/dotfiles` and is versioned in git.
 
-This sheet covers how to get into the environment, use each tool to its full
-capability, and change how everything is configured.
+Every key binding below was checked against the config files in this repo. Where a default
+from the tool itself is listed, it's marked *(default)*.
+
+**Contents**
+
+1. [The daily workflow: tmux + Claude Code](#1-the-daily-workflow-tmux--claude-code)
+2. [Getting into the environment](#2-getting-into-the-environment)
+3. [tmux](#3-tmux)
+4. [Claude Code](#4-claude-code)
+5. [no-mistakes (push gate)](#5-no-mistakes-push-gate)
+6. [WezTerm](#6-wezterm)
+7. [zsh](#7-zsh)
+8. [fzf, ripgrep, fd, jq, htop](#8-fzf-ripgrep-fd-jq-htop)
+9. [Git](#9-git)
+10. [Neovim](#10-neovim)
+11. [vim](#11-vim)
+12. [Starship prompt](#12-starship-prompt)
+13. [Nix, home-manager and install.sh](#13-nix-home-manager-and-installsh)
+14. [Worked example: edit → apply → test → revert](#14-worked-example-edit--apply--test--revert)
+15. [Known gaps in the current configs](#15-known-gaps-in-the-current-configs)
+16. [Where each config lives](#16-where-each-config-lives)
 
 ---
 
-## 1. Getting into the environment
+## 1. The daily workflow: tmux + Claude Code
 
-### From Windows PowerShell
+The setup in one picture: **WezTerm** is the window, **tmux** runs inside it and holds several
+windows, and each tmux window runs one job.
 
-Fastest way to a Linux shell (drops you into the WSL home directory):
-
-```powershell
-wsl
+```
+WezTerm
+└── tmux session "capstone"           ← one session per project
+    ├── window 1: claude              ← Claude Code (the agent)
+    ├── window 2: shell               ← your own commands, tests, servers
+    └── window 3: git                 ← git st / git lg / reviewing diffs
 ```
 
-Or open a specific WSL distribution / start directly in the dotfiles repo:
+Switch windows with `Ctrl-a 1`, `Ctrl-a 2`, `Ctrl-a 3`. Detach with `Ctrl-a d` and everything
+keeps running; `tmux attach` brings it all back exactly as you left it.
 
-```powershell
-wsl -d Ubuntu
-wsl --cd "~/github/AdamDunn1437/dotfiles"
-wsl ~
-```
-
-To browse the WSL filesystem without opening a shell (slow for heavy file
-operations — prefer `wsl` for real work):
-
-```powershell
-cd \\wsl.localhost\Ubuntu\home\adunner\github\AdamDunn1437\dotfiles
-```
-
-You can also reach WSL from the terminal: `wsl.exe -d Ubuntu -- cd ~` runs a
-command then exits.
-
-**What this stack is for.** The whole point is *reproducibility*. Nix pins an
-exact set of tool versions in `flake.lock`, so every machine you set up gets the
-same tools — no "works here but not there" version drift. `nix develop` puts
-those pinned tools in front of your PATH for the current session; `./install.sh`
-and home-manager then place your *configuration* on top. You edit one file in
-this repo and every tool picks it up from there, instead of manually configuring
-each app.
-
-**Companion tools you get for free** (installed but not covered by their own
-section):
-
-| Tool | What it does | When you'll reach for it |
-|---|---|---|
-| `fzf` | Fuzzy finder | `Ctrl+t` (file), `Ctrl+r` (history), `Alt+c` (cd) in zsh; `<C-p>`/`<C-g>` in nvim |
-| `rg` (ripgrep) | Search file contents at speed | `rg "foo" src/` instead of slow `grep -r` |
-| `fd` | Find files by name, fast | `fd "*.md"` instead of `find` |
-| `htop` | Interactive process monitor | Diagnose what's eating CPU/RAM |
-| `jq` | Parse/filter JSON in the shell | `curl ... | jq '.name'` |
-
-### From inside the WSL shell
+### Build it by hand (do this once to learn the keys)
 
 ```bash
-cd ~/github/AdamDunn1437/dotfiles  # the dotfiles repo
+cd ~/github/your-project
+tmux new -s capstone          # new session called "capstone"; you're now in window 1
+claude                        # start Claude Code in window 1
 ```
 
-### Activate the dev environment
+Then, using the keys from section 3:
 
-The pinned tools (git, zsh, vim, tmux, starship, fzf, ripgrep, fd, wezterm) are
-only on your PATH while the Nix dev shell is active:
+| Step | Keys | What happens |
+|---|---|---|
+| Name this window | `Ctrl-a ,` → type `claude` → Enter | Status bar shows `1:claude` |
+| New window | `Ctrl-a c` | Window 2 opens (in your **home** folder; `cd` back to the project) |
+| Name it | `Ctrl-a ,` → `shell` → Enter | |
+| Another window | `Ctrl-a c`, then `Ctrl-a ,` → `git` | Window 3 |
+| Jump around | `Ctrl-a 1` / `Ctrl-a 2` / `Ctrl-a 3` | |
+| Leave it running | `Ctrl-a d` | Back to plain zsh; tmux keeps going |
+| Come back | `tmux attach -t capstone` | Everything as you left it |
+
+### Or create it in one command
+
+Paste this function into your shell to try it. To keep it, add it to `initContent` in
+`home.nix` and run `home-manager switch --flake .`.
+
+```bash
+# dev [dir]: open (or reattach to) a tmux session for a project
+# with windows: 1 claude, 2 shell, 3 git
+dev() {
+  local dir name
+  dir="$(cd "${1:-$PWD}" && pwd)" || return 1
+  name="$(basename "$dir" | tr '.:' '__')"     # tmux session names can't contain . or :
+  if ! tmux has-session -t "=$name" 2>/dev/null; then
+    tmux new-session -d -s "$name" -n claude -c "$dir"
+    tmux send-keys -t "=$name:claude" 'claude' C-m
+    tmux new-window -t "=$name" -n shell -c "$dir"
+    tmux new-window -t "=$name" -n git -c "$dir"
+    tmux send-keys -t "=$name:git" 'git lg | head -20; git st' C-m
+    tmux select-window -t "=$name:claude"
+  fi
+  if [ -n "$TMUX" ]; then tmux switch-client -t "=$name"; else tmux attach -t "=$name"; fi
+}
+```
+
+Usage: `dev ~/github/capstone`, or `cd` into a project and run `dev`. Running it again just
+reattaches; it won't create duplicate windows.
+
+### Want them side by side instead?
+
+Inside the `claude` window press `Ctrl-a |` to split it. Claude stays on the left, a shell opens
+on the right. Move between the two with `Alt+←` / `Alt+→`, and zoom either one full-screen
+with `Ctrl-a z` (press again to unzoom).
+
+### A typical feature, start to finish
+
+1. `dev ~/github/capstone`
+2. Window 1 (`claude`): describe the feature, then `/grill-me`. Answer its questions one at a time.
+3. Claude writes `SPEC.md`, you `/compact`, it builds with tests first.
+4. Window 2 (`shell`): run the app or tests yourself while it works.
+5. Window 3 (`git`): `git df` to read what changed.
+6. Back in window 1: `/pr-review-toolkit:review-pr`, then `git push no-mistakes`, then `/explain-back`.
+7. `Ctrl-a d` when you're done for the day.
+
+---
+
+## 2. Getting into the environment
+
+### From Windows
+
+```powershell
+wsl                                   # Linux shell in your WSL home
+wsl -d Ubuntu                         # a specific distro
+wsl --cd "~/github/AdamDunn1437/dotfiles"
+```
+
+Browse WSL files from Explorer (slow for heavy work; use `wsl` for real work):
+`\\wsl.localhost\Ubuntu\home\adunner\github\AdamDunn1437\dotfiles`
+
+### Activate the dev shell
+
+The pinned tools in `flake.nix` (git, zsh, vim, tmux, starship, fzf, ripgrep, fd, wezterm) are
+on your PATH only while the Nix dev shell is active:
 
 ```bash
 cd ~/github/AdamDunn1437/dotfiles
-nix develop
+nix develop          # prints the version of each tool
+exit                 # leave the dev shell
 ```
 
-This prints the versions of everything available. While inside the shell you see
-the starship `❄ nix-shell` indicator. To leave: `exit`.
-
-> **Note:** `nix develop` only affects the current shell session. New terminals
-> need to run it again. The system-installed packages you use daily (zsh,
-> starship, fzf bindings via your `~/.zshrc`) come from home-manager, not Nix.
+`nix develop` only affects the current shell. jq, htop and starship come from home-manager
+(`home.packages`), so they're always available.
 
 ### Why the paths work
 
-- `$HOME/.local/bin` is prepended to your PATH (see `home.nix`), so anything you
-  install there is callable.
-- `EDITOR` / `VISUAL` are set to `vim` — tools like `git commit` will open vim.
-- Inside `nix develop`, Homebrew/Linuxbrew is added to PATH **after** Nix paths so
-  Nix-managed tools win. Outside the shell, `~/.zshrc` also sources brew.
-
----
-
-## 2. WezTerm
-
-WezTerm is a GPU-accelerated terminal emulator. Its config lives at
-`~/github/AdamDunn1437/dotfiles/home/.config/wezterm/wezterm.lua` and is linked
-into place by home-manager as an out-of-store symlink.
-
-**What it is / why you'd use it.** WezTerm is the app you actually look at all
-day — it's what renders your shell, nvim, tmux status lines, and Nerd Font
-icons. Because it renders on the GPU it stays smooth even with 80% background
-transparency, lots of scrolling, and big fonts. Its config being plain Lua is
-the key payoff: your whole terminal is version-controlled in this repo, with no
-GUI settings panel to click through and no state to lose when you reinstall.
-It's also cross-platform, so the same `wezterm.lua` works identically if you
-ever leave WSL. It supports tabs/windows out of the box and renders true-colour
-schemes like rose-pine-moon exactly as designed.
-
-### Current settings
-
-| Setting | Value | Where |
-|---|---|---|
-| Color scheme | `rose-pine-moon` | `wezterm.lua` |
-| Font | Hack Nerd Font, 15pt | `wezterm.lua` |
-| Background opacity | 80% | `wezterm.lua` |
-| Tab bar | hidden when only one tab | `wezterm.lua` |
-| Window decorations | resize only | `wezterm.lua` |
-
-### Launching
-
-WezTerm is Windows software that opens a WSL shell. Launch it from Windows
-PowerShell or the Start menu, then run `wsl` to get into Linux, or configure its
-default program if you want it to auto-open WSL. From inside the dev shell you
-can also start it (it runs the Windows GUI):
-
-```bash
-wezterm start -- wsl
-```
-
-### Changing it
-
-1. Edit `home/.config/wezterm/wezterm.lua`.
-2. Apply with home-manager:
-   ```bash
-   home-manager switch --flake .
-   ```
-   (Because it's an out-of-store symlink, the running config also just needs the
-   file saved + WezTerm relaunched.)
-
-Try the LSP for completions/validation:
-
-```bash
-wezterm.exe lua docs /path/to/wezterm.lua   # validate config
-```
-
-Useful example: add a keybinding to open a new tab across the config's `keys`
-table (this setup hasn't customized the default key table — defaults are in the
-[WezTerm docs](https://wezterm.org/config/keys.html)).
+- `$HOME/.local/bin` is on PATH (`home.nix`). Claude Code's native installer puts `claude` there.
+- `EDITOR` / `VISUAL` are `vim`, so `git commit` opens vim.
+- Inside `nix develop`, Linuxbrew is added **after** the Nix paths, so Nix-managed tools win.
 
 ---
 
 ## 3. tmux
 
-**Prefix is `Ctrl-a`** (not the default `Ctrl-b`) so it's thumb-friendly on QWERTY.
-Config: `~/github/AdamDunn1437/dotfiles/config/tmux/.tmux.conf`, symlinked via
-`install.sh` to `~/.tmux.conf`.
+Config: `config/tmux/.tmux.conf` → `~/.tmux.conf` (via `install.sh`).
 
-**What it is / why you'd use it.** tmux is a terminal *multiplexer* — one
-terminal window that hosts many panes and windows, where your sessions keep
-running even after you detach. This matters for long-lived work (a dev server,
-a `nix develop` build, a remote install over SSH): detach with `Ctrl-a d`,
-walk away for hours, come back and `tmux attach` exactly where you left off.
-Splitting a window into panes (`Ctrl-a |` / `Ctrl-a -`) is the standard way to
-run an editor beside a shell without a second monitor, and because tmux works
-the same over SSH it's your go-to for remote machines too. Pairs perfectly with
-neovim: one pane for the editor, one for `git`/`nix` commands, one for logs.
+### The four ideas
 
-### Starting
+| Thing | What it is | Analogy |
+|---|---|---|
+| **Server** | Background process that owns everything. Survives you closing WezTerm. | The tmux "app" |
+| **Session** | A named workspace, usually one per project (`capstone`, `dotfiles`) | A desktop |
+| **Window** | A full-screen tab inside a session; shown in the status bar as `1:claude 2:shell` | A browser tab |
+| **Pane** | A split inside a window | Split-screen |
+
+**The prefix.** Almost every tmux command is *prefix, then a key*. Your prefix is **`Ctrl-a`**:
+press Ctrl+a, **let go**, then press the key. `Ctrl-a c` means "Ctrl+a, release, then c".
+
+> In zsh, `Ctrl-a` normally jumps to the start of the line. Inside tmux, press **`Ctrl-a` twice**
+> to send that to the shell (`bind C-a send-prefix`).
+
+### Sessions (from the shell, outside tmux)
 
 ```bash
-tmux                  # new session
-tmux new -s work      # new session named "work"
-tmux ls               # list sessions
-tmux attach -t work   # reattach to a session
-tmux kill-server      # nuke all tmux
+tmux                         # new unnamed session
+tmux new -s capstone         # new session named "capstone"
+tmux ls                      # list sessions
+tmux attach                  # attach to the most recent session
+tmux attach -t capstone      # attach to a specific one
+tmux kill-session -t capstone
+tmux kill-server             # stop everything (all sessions die)
 ```
 
 ### Key table (prefix = Ctrl-a)
 
-| Shortcut | Action |
-|---|---|
-| `Ctrl-a` `|` | Split pane **vertically** (left/right) |
-| `Ctrl-a` `-` | Split pane **horizontally** (top/bottom) |
-| `Alt+←/→/↑/↓` | Move between panes |
-| `Alt+h/j/k/l` | Resize pane by 5 (hold to repeat) |
-| `Ctrl-a` `c` | New window |
-| `Ctrl-a` `n` / `p` | Next / previous window |
-| `Ctrl-a` `0–9` | Jump to window number (windows start at **1**, not 0) |
-| `Ctrl-a` `,` | Rename window |
-| `Ctrl-a` `d` | Detach (keep session running in background) |
-| `Ctrl-a` `r` | Reload `~/.tmux.conf` |
-| `Ctrl-a` `[` | Enter copy mode (vi keys: `j/k/h/l`, `/` search, `v` select, `y` yank) |
-| `Ctrl-a` `]` | Paste buffer |
-| `Ctrl-a` `:` | Command prompt (e.g. `set -g mouse off`) |
-| `Ctrl-a` `z` | Zoom / unzoom current pane |
-| `Ctrl-a` `x` | Kill current pane |
+**Sessions**
 
-Mouse is on: click panes/windows, scroll to enter copy-mode scrollback
-(scrollback is 50,000 lines).
+| Keys | Action |
+|---|---|
+| `Ctrl-a d` | Detach (session keeps running) *(default)* |
+| `Ctrl-a s` | Pick a session from a list *(default)* |
+| `Ctrl-a $` | Rename session *(default)* |
+| `Ctrl-a (` / `)` | Previous / next session *(default)* |
+
+**Windows**
+
+| Keys | Action |
+|---|---|
+| `Ctrl-a c` | New window (opens in your home folder) *(default)* |
+| `Ctrl-a ,` | Rename window *(default)* |
+| `Ctrl-a 1`…`9` | Jump to window N (**numbering starts at 1**, per config) |
+| `Ctrl-a n` / `p` | Next / previous window *(default)* |
+| `Ctrl-a l` | Last-used window (toggle between two) *(default)* |
+| `Ctrl-a w` | Tree of all sessions + windows, with previews *(default)* |
+| `Ctrl-a &` | Kill window (asks first) *(default)* |
+
+**Panes**
+
+| Keys | Action |
+|---|---|
+| `Ctrl-a \|` | Split **left/right**, in the current folder (config) |
+| `Ctrl-a -` | Split **top/bottom**, in the current folder (config) |
+| `Alt+←/→/↑/↓` | Move between panes, **no prefix needed** (config) |
+| `Ctrl-a Alt+h/j/k/l` | Resize by 5 cells; keep tapping `Alt+h/j/k/l` to repeat (config) |
+| `Ctrl-a z` | Zoom pane full-screen / unzoom *(default)* |
+| `Ctrl-a x` | Kill pane (asks first) *(default)* |
+| `Ctrl-a q` | Flash pane numbers; press a number to jump *(default)* |
+| `Ctrl-a {` / `}` | Swap pane with previous / next *(default)* |
+| `Ctrl-a Space` | Cycle through preset layouts *(default)* |
+| `Ctrl-a !` | Break the pane out into its own window *(default)* |
+
+**Everything else**
+
+| Keys | Action |
+|---|---|
+| `Ctrl-a r` | Reload `~/.tmux.conf` (shows "Reloaded!") (config) |
+| `Ctrl-a ?` | List every key binding; `q` to close *(default)* |
+| `Ctrl-a :` | Command prompt, e.g. `kill-pane`, `set -g mouse off` *(default)* |
+| `Ctrl-a [` | Enter copy/scroll mode (below) *(default)* |
+| `Ctrl-a ]` | Paste the last tmux copy *(default)* |
+
+### Scrolling and copying
+
+The mouse is on: **scroll the wheel** to scroll back (50,000 lines kept), click a pane to focus
+it, click a window name to switch, drag a border to resize.
+
+Keyboard copy mode uses vi keys (`mode-keys vi`):
+
+| In copy mode | Action |
+|---|---|
+| `Ctrl-a [` | Enter copy mode |
+| `h j k l`, `Ctrl-u` / `Ctrl-d` | Move; half-page up / down |
+| `/` or `?` then text | Search down / up; `n` / `N` next / previous |
+| `Space` | Start selection |
+| `Enter` | Copy selection and exit |
+| `v` | Toggle rectangle (block) selection |
+| `q` | Exit without copying |
+
+> **Copying to Windows.** Dragging with the mouse copies into **tmux's** buffer (paste with
+> `Ctrl-a ]`), and may not reach the Windows clipboard. Hold **Shift** while you drag to use
+> WezTerm's own selection instead, then `Ctrl+Shift+C` to copy to Windows.
+
+### Gotchas
+
+- **New windows start in `~`.** Only the splits (`|` / `-`) keep the current folder. Use `dev`
+  (section 1) or `cd` after `Ctrl-a c`.
+- **Don't start tmux inside tmux.** If `echo $TMUX` prints something, you're already inside one.
+- **Config changes** only apply after `Ctrl-a r` (or `tmux source-file ~/.tmux.conf`).
+- The comment in `.tmux.conf` says resize is "Shift + arrow", but the binding is **`Alt+h/j/k/l`**.
 
 ### Changing it
 
-Edit `config/tmux/.tmux.conf`, then either:
-
-```bash
-tmux source-file ~/.tmux.conf    # reload for the current session
-./install.sh                     # re-link if you changed the symlink target
-```
+Edit `config/tmux/.tmux.conf`, then `Ctrl-a r`. Re-run `./install.sh` only if the symlink is
+missing.
 
 ---
 
-## 4. Neovim
+## 4. Claude Code
 
-Config: `~/github/AdamDunn1437/dotfiles/config/nvim/init.lua`, symlinked via
-`install.sh` to `~/.config/nvim/init.lua`. Plugins are pulled by **lazy.nvim** on
-first launch. Colorscheme is **catppuccin-mocha**.
+Claude Code is Claude running **in your terminal, inside a project folder**. Unlike a chat, it can
+read your files, edit them, run commands (tests, git, builds) and check its own work. By default
+it asks before editing files or running commands.
 
-**What it is / why you'd use it.** Neovim is the editor built on vim's modal
-model: *normal mode* applies to text (keys are commands), *insert mode* applies
-to typing text. That split is what makes "no mouse, hands stay on home row"
-workable. Its config is a single Lua file, so your entire editor — keymaps,
-plugins, look — is reproducible and versioned in this repo. The plugins here
-turn a bare editor into a real IDE: fuzzy file finding (`<C-p>`), project-wide
-grep (`<C-g>`), Git workflows (`:Git`, `:Gbrowse`), syntax trees (treesitter),
-and a statusline (lualine). Because it's terminal-native, it runs happily inside
-a tmux pane or over SSH with zero special setup.
-
-### Launching
+### Install and log in (once)
 
 ```bash
-nvim <file>      # edit a file
-nvim .           # open netrw file browser at the current dir
+curl -fsSL https://claude.ai/install.sh | bash    # run inside WSL, not PowerShell
+claude --version                                  # open a new terminal first
+cd ~/github/AdamDunn1437/dotfiles
+./install.sh                                      # links ~/.claude/CLAUDE.md + explain-back skill
+bash scripts/setup-claude-tools.sh                # grill-me pack, pr-review-toolkit, no-mistakes
 ```
 
-### Key table (leader = space)
+The first `claude` run asks you to log in with your Claude account.
 
-| Shortcut | Action |
+### Starting it
+
+```bash
+cd ~/github/capstone
+claude                        # new conversation in this project
+claude -c                     # continue the most recent conversation here
+claude -r                     # pick an older conversation to resume
+claude -p "explain src/sim"   # one-shot answer, no interactive session
+```
+
+### Keys inside a session
+
+| Keys / input | Action |
 |---|---|
-| `Space w` | Write/save file |
-| `Space q` | Quit |
-| `Space e` | Show diagnostics (error/warning float) |
-| `Space u` | Toggle undo tree |
-| `<C-p>` | Find files (fzf-lua) |
-| `<C-g>` | Live grep across project (fzf-lua) |
-| `Esc` | Clear search highlight |
-| `u` / `<C-r>` | Undo / redo |
-| `:earlier 30m` / `:later 30m` | Jump back/forward in the file's undo history (persistent undo) |
-| `/` | Search (case-insensitive, smartcase) |
-| `n` / `N` | Next / previous search match |
-| `g d` | Go to definition (via LSP if attached) |
-| `:w`, `:q`, `:wq`, `:q!` | Classic vim write/quit |
+| `Enter` | Send message |
+| `\` then `Enter` | New line without sending (or run `/terminal-setup` to enable Shift+Enter) |
+| `Shift+Tab` | Cycle permission mode: normal → auto-accept edits → **plan mode** (reads and plans, no edits) |
+| `Esc` | Stop Claude mid-task (your conversation is kept) |
+| `Esc` `Esc` | Jump back to an earlier message to edit or rewind |
+| `@path/to/file` | Attach a file or folder to your message (Tab-completes) |
+| `!command` | Run a shell command yourself; the output goes into the conversation |
+| `Ctrl+C` twice | Quit Claude Code |
 
-### Built-in niceties
+### Slash commands you'll use
 
-- Relative line numbers on (`number` + `relativenumber`).
-- **Persistent undo** — undo history survives restarts (`undofile`).
-- No swap files. Indent auto-detected by `vim-sleuth` (2-space default).
-- `vim-fugitive` gives `:Git` inside nvim; `vim-rhubarb` gives `:Gbrowse` to open
-  the current file/line on GitHub.
-- lualine statusline, treesitter highlighting, and file icons are enabled.
+| Command | What it does |
+|---|---|
+| `/help` | Everything available, including plugin commands. Trust this over any cheat sheet. |
+| `/clear` | Start a fresh conversation (saves tokens when switching tasks) |
+| `/compact` | Summarize the conversation so far to free context; add a note on what to keep |
+| `/init` | Create a project `CLAUDE.md` describing this repo |
+| `/config` | Settings, including **Output style → Learning** (Claude leaves small pieces for you to write) |
+| `/model` | Switch model |
+| `/plugin` | Install, enable or disable plugins |
+| `/reload-plugins` | Pick up newly installed plugins without restarting |
 
-### Changing it
+### The workflow your CLAUDE.md asks for
 
-1. Edit `config/nvim/init.lua`.
-2. Re-run `./install.sh` (it re-creates the symlink if needed; it points at the
-   same file, so just restarting nvim is usually enough).
+Your global `~/.claude/CLAUDE.md` (from `config/claude/CLAUDE.md`) applies to every project.
+It tells Claude to follow this pipeline:
 
-Add plugins inside the `require("lazy").setup({...})` table, then restart nvim;
-lazy.nvim installs them automatically. Run `:Lazy` for the plugin manager UI.
+| Step | Command | From |
+|---|---|---|
+| 1. Design interview, one question at a time | `/grill-me` (or `grill-with-docs` in repos with domain docs) | mattpocock-skills |
+| 2. Plan → `SPEC.md` → `/compact` | (Claude prompts you) | CLAUDE.md |
+| 3. Build test-first, one slice at a time | `tdd` skill (Claude picks it up automatically) | mattpocock-skills |
+| 4. Multi-agent self-review | `/pr-review-toolkit:review-pr` (optionally `tests errors` to narrow) | pr-review-toolkit |
+| 5. Push through the gate | `git push no-mistakes` or `/no-mistakes` | no-mistakes |
+| 6. Check you understand it | `/explain-back` | your skill in `config/claude/skills/` |
+
+Other skills from the pack worth knowing: `teach` (multi-session lessons on a concept),
+`wait-what` (re-explain the last message in plain language), `handoff` (summarize so another
+session can continue), `diagnosing-bugs`. Run `/setup-matt-pocock-skills` once per repo before
+using the engineering skills.
+
+### Tips
+
+- **One task per conversation.** `/clear` between unrelated tasks; long contexts drift.
+- **Plan mode first** (`Shift+Tab`) for anything you don't fully understand yet.
+- **Read the diff yourself** in your `git` window (`git df`) before you approve a commit.
+- If it ignores a CLAUDE.md rule, say so plainly ("CLAUDE.md says to use the gate"). That
+  happens in long sessions.
 
 ---
 
-## 5. zsh
+## 5. no-mistakes (push gate)
 
-zsh is managed by **home-manager** (`programs.zsh` in `home.nix`). The effective
-config is generated from `home.nix` at `home-manager switch`.
+A local git proxy: instead of `git push origin`, you `git push no-mistakes`. It copies your branch
+into a throwaway worktree, rebases on the latest remote, then runs AI **review → tests → docs →
+lint**. If everything passes and you approve, it pushes, opens the PR and watches CI.
 
-**What it is / why you'd use it.** zsh is your interactive shell — the program
-that reads every command you type, runs it, and gives your prompt back. Compared
-to the default bash it has saner tab completion, globbing, and history out of
-the box, and this setup layers on the three things that most improve daily
-comfort: **ghost-text autosuggestions** (hit `Ctrl+f` to accept instead of
-re-typing commands), **syntax highlighting** (typos and unknown commands turn
-red as you type), and **shared history** (a command typed in one terminal is
-findable with `Ctrl+r` in every other one, because they all write to the same
-history file). Home-manager *generates* `~/.zshrc` from `home.nix`, which means
-your shell configuration is also reproducible — you never edit the generated
-file directly, you edit `home.nix` and re-apply.
+### Set up (once per repo)
+
+```bash
+cd ~/github/capstone
+no-mistakes init             # adds the `no-mistakes` remote and the /no-mistakes Claude skill
+```
+
+### Use
+
+```bash
+git push no-mistakes         # send the current branch through the gate
+no-mistakes                  # open the TUI to watch progress and approve, fix or skip findings
+```
+
+Or from Claude Code: `/no-mistakes` gates already-committed work, and `/no-mistakes <task>`
+does the task and then gates it.
+
+**Token tip:** your CLAUDE.md asks Claude to run the gate from a fresh, cheap **Sonnet** subagent
+rather than the long builder conversation, so every gate turn doesn't resend 200k tokens.
+
+**It is not a replacement for you.** It catches sloppiness; you still judge intent and design.
+That's what `/explain-back` is for.
+
+---
+
+## 6. WezTerm
+
+Config: `home/.config/wezterm/wezterm.lua`, linked by home-manager (out-of-store symlink, so
+saving the file + relaunching WezTerm is enough).
+
+| Setting | Value |
+|---|---|
+| Color scheme | `rose-pine-moon` |
+| Font | Hack Nerd Font, 15pt |
+| Background opacity | 80% |
+| Tab bar | hidden when only one tab |
+| Window decorations | resize only |
+
+### Keys *(all WezTerm defaults; this config doesn't change them)*
+
+| Keys | Action |
+|---|---|
+| `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy / paste (Windows clipboard) |
+| `Ctrl+Shift+T` / `Ctrl+Shift+W` | New tab / close tab |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab |
+| `Ctrl+Shift+F` | Search scrollback |
+| `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | Font bigger / smaller / reset |
+| `Ctrl+Shift+P` | Command palette (search every action) |
+| `Alt+Enter` | Toggle full-screen |
+
+**Use tmux windows, not WezTerm tabs**, for project work. tmux survives closing WezTerm;
+WezTerm tabs don't.
+
+---
+
+## 7. zsh
+
+Generated by home-manager from `programs.zsh` in `home.nix`. **Never edit `~/.zshrc`
+directly**; it gets overwritten. Edit `home.nix`, then `home-manager switch --flake .` and
+`exec zsh`.
 
 ### Features
 
-- **Ghost-text autosuggestions** (blue): type and hit **`Ctrl+f`** to accept the
-  suggestion (nicer than the default right-arrow).
-- **Syntax highlighting** as you type.
-- **fzf** keybindings:
-  - `Ctrl+t` — insert a file path
-  - `Ctrl+r` — fuzzy-search history
-  - `Alt+c` — fuzzy-cd into a directory
-- `AUTO_CD` is on: type a directory name and press Enter, no `cd` needed.
-- **Shared history** — every terminal shares one history file (10,000 lines,
-  duplicates ignored).
+| Feature | How to use it |
+|---|---|
+| Autosuggestions | Grey/blue ghost text from history as you type → **`Ctrl+F`** accepts it |
+| Syntax highlighting | Unknown commands turn red before you press Enter |
+| Shared history | Every terminal and tmux pane shares one history (10,000 entries, duplicates dropped) |
+| `AUTO_CD` | Type a folder name + Enter to `cd` into it |
+| fzf keys | `Ctrl+R` history, `Ctrl+T` file path, `Alt+C` cd (section 8) |
 
-### Aliases
+### Line-editing keys *(zsh defaults, emacs mode)*
+
+| Keys | Action |
+|---|---|
+| `Ctrl+A` / `Ctrl+E` | Start / end of line (**inside tmux: press `Ctrl-a` twice**) |
+| `Alt+B` / `Alt+F` | Back / forward one word |
+| `Ctrl+W` | Delete previous word |
+| `Ctrl+U` / `Ctrl+K` | Delete to start / end of line |
+| `Ctrl+L` | Clear screen |
+| `Tab` | Complete; press again for a menu |
+| `!!` | Previous command (`sudo !!`) |
+
+### Aliases (from `home.nix`)
 
 | Alias | Expands to |
 |---|---|
@@ -307,293 +439,340 @@ file directly, you edit `home.nix` and re-apply.
 | `add` | `git add` |
 | `commit` | `git commit` |
 | `push` | `git push` |
-| `diff` | `git diff` |
-
-### Changing it
-
-Edit `home.nix` (`initContent`, `shellAliases`, `history`, etc.), then:
-
-```bash
-home-manager switch --flake .
-```
-
-New aliases / settings land in the next shell you open (or `exec zsh`).
+| `diff` | `git diff` (shadows the system `diff`; use `command diff a b` for that) |
 
 ---
 
-## 6. Git
+## 8. fzf, ripgrep, fd, jq, htop
 
-**What it is / why you'd use it.** Git is version control — the network of
-safety under every file in this repo. It records every committed change, shows
-what you've modified (`git diff`), lets you shelve half-finished experiments
-(`git stash`), and reverts to any earlier state (`git restore`, `git revert`).
-That last ability is the whole reason you can confidently edit configs and go
-back: section 9 walks through exactly that loop. This dotfiles folder is itself
-a Git repository, so *every* config change is captured in `git lg` and can be
-rolled back. Its integration with neovim (fugitive/`:Git`) means you can commit
-and interact with Git without leaving the editor.
+### fzf: fuzzy finder
 
-### Global ignores
+Type a few letters in any order and it narrows the list. `Enter` picks, `Esc` cancels,
+`Tab` multi-selects.
 
-`config/git/.gitignore_global` → `~/.gitignore_global` keeps swap files, OS
-junk, and editor folders out of every repo automatically (wired in via
-`core.excludesFile`).
+| In zsh | Action |
+|---|---|
+| `Ctrl+R` | Search command history (much better than plain history) |
+| `Ctrl+T` | Insert a file path at the cursor: `nvim ` then `Ctrl+T` |
+| `Alt+C` | Fuzzy `cd` into a subfolder |
+| `**` + `Tab` | Fuzzy-complete paths: `cd **<Tab>`, `nvim src/**<Tab>` |
+
+```bash
+git branch | fzf | xargs git checkout   # pick a branch to switch to
+```
+
+### rg (ripgrep): search inside files
+
+Fast, respects `.gitignore`, recursive by default.
+
+```bash
+rg "TODO"                    # search everything below here
+rg -i "drone"                # case-insensitive
+rg -w "init"                 # whole word only
+rg "fn main" -t rust         # only Rust files (-t py, -t js, ...)
+rg "import" -g '*.py'        # glob filter
+rg -l "SPEC"                 # just list matching file names
+rg -C 3 "panic"              # 3 lines of context around each hit
+rg --hidden "token"          # include dotfiles
+```
+
+### fd: find files by name
+
+```bash
+fd config                    # names containing "config"
+fd -e md                     # by extension
+fd -e py -x wc -l            # run a command on each result
+fd -H .tmux                  # include hidden files
+fd -t d src                  # directories only
+```
+
+### jq: work with JSON
+
+```bash
+cat data.json | jq .                         # pretty-print
+jq '.name' package.json                      # one field
+jq '.items[] | {id, status}' resp.json       # reshape each element
+jq -r '.dependencies | keys[]' package.json  # raw strings, one per line
+```
+
+### htop: what's using my CPU / RAM?
+
+`htop`, then `F6` sort, `F3` search, `F9` kill (pick a signal), `F5` tree view, `q` quit.
+
+---
+
+## 9. Git
+
+Config: `config/git/.gitconfig` (+ `.gitignore_global` for swap files and OS junk in every repo).
 
 ### Aliases
 
-| Alias | Command | Example |
+| Alias | Command | Use it for |
 |---|---|---|
-| `lg` | `log --oneline --graph --decorate --all` | `git lg` |
-| `st` | `status -sb` | `git st` |
-| `co` | `checkout` | `git co main` |
-| `cb` | `checkout -b` | `git cb feature/x` |
-| `ci` | `commit` | `git ci -m "msg"` |
-| `ca` | `commit --amend` | `git ca` |
-| `df` | `diff` | `git df` |
-| `dc` | `diff --cached` | `git dc` |
-| `last` | `log -1 HEAD` | `git last` |
-| `br` | pretty branch list | `git br` |
-| `unstage` | `reset HEAD --` | `git unstage <file>` |
-| `cleanup` | prune + gc | `git cleanup` |
+| `git st` | `status -sb` | Short status with branch |
+| `git lg` | `log --oneline --graph --decorate --all` | The whole history as a graph |
+| `git last` | `log -1 HEAD` | What was the last commit? |
+| `git df` / `git dc` | `diff` / `diff --cached` | Unstaged / staged changes |
+| `git co <branch>` | `checkout` | Switch branch |
+| `git cb <name>` | `checkout -b` | New branch |
+| `git ci -m "msg"` | `commit` | Commit |
+| `git ca` | `commit --amend` | Fix the last commit (only if not pushed yet) |
+| `git unstage <file>` | `reset HEAD --` | Undo `git add` |
+| `git br` | pretty branch list | Branches with last commit subject |
+| `git cleanup` | prune + gc | Tidy stale remote branches |
 
-Defaults: default branch is `main` on `git init`, editor is `vim`, color on.
-
-> **WSL quirk:** the repo root has a `safe.directory` entry for the
-> `\\wsl.localhost\...` UNC path. If git ever complains "dubious ownership",
-> `git config --global --add safe.directory <path>` fixes it.
-
-### Changing it
-
-Edit `config/git/.gitconfig`, then `./install.sh`. Per-repo identity (not stored
-in dotfiles, by design):
+### The everyday loop
 
 ```bash
-git config user.name "Adam Dunn"
-git config user.email "you@example.com"
+git cb feature/hover-mode        # 1. branch
+# ... work (or let Claude work) ...
+git st && git df                 # 2. see what changed
+add -p                           # 3. stage hunk by hunk (y/n for each)
+git dc                           # 4. check what you're about to commit
+git ci -m "Add hover mode"       # 5. commit
+git push no-mistakes             # 6. through the gate (or: push -u origin HEAD)
 ```
 
----
+### Undo cheats
 
-## 7. Starship prompt
-
-Prompt is defined in two places:
-
-- **home-manager** (`programs.starship` in `home.nix`) — the active one.
-- **`config/starship/starship.toml`** — an alternative minimal config symlinked
-  by `install.sh` (not the one zsh uses by default, unless you set
-  `STARSHIP_CONFIG=~/.config/starship.toml`).
-
-**What it is / why you'd use it.** Starship is your prompt — the line text
-before your cursor. A good prompt eliminates the reflex of running `pwd`, `git
-status`, or `which python` every few minutes, because it answers those questions
-constantly for free: which directory, which git branch and whether it's clean
-(⇡/⇣ arrows), how long the last command took, and — crucially — whether the
-`❄` nix-shell is active. It's rendered in a fraction of a millisecond (no
-noticeable lag as you type) and it's cross-shell, so the exact same prompt
-follows you into bash or fish. The failure marker (`➜` turns red + nonzero exit
-code) instantly tells you whether your last command actually succeeded.
-
-### Reading the prompt (left to right)
-
-| Segment | Shows |
+| Oops | Fix |
 |---|---|
-| os + username | current user |
-| `directory` | current dir, truncated to 3 path components |
-| `git_branch` / `git_status` | branch name (purple) + status (⇡ ahead, ⇣ behind, ⛳ conflicts) |
-| ❄ `nix-shell` | active, when inside `nix develop` |
-| node/rust/python | active toolchains, when detected |
-| `⏱ <duration>` | time of last command |
-| `➜` green/red | success / failure prompt character |
+| Discard edits to a file | `git restore <file>` |
+| Unstage a file | `git unstage <file>` |
+| Put work aside for a moment | `git stash` … `git stash pop` |
+| Undo the last commit, keep the changes | `git reset --soft HEAD~1` |
+| Undo a pushed commit safely | `git revert <hash>` |
+| "I lost a commit" | `git reflog`, find it, then `git cb rescue <hash>` |
 
-### Changing it
-
-The live prompt comes from `home.nix`:
-
-```bash
-home-manager switch --flake .
-```
-
-To try the file-based version instead, add the override:
-
-```bash
-export STARSHIP_CONFIG=$HOME/.config/starship.toml
-starship preset list   # explore official presets
-starship print-config # what's currently active
-```
+Identity is per-repo by design: `git config user.name "Adam Dunn"`,
+`git config user.email "..."`.
 
 ---
 
-## 8. Install, re-install, and how Nix fits in
+## 10. Neovim
 
-**What Nix is / why you'd use it.** Nix is a package manager with a strong
-guarantee: it builds packages from locked source revisions, so the same flake
-reproducibly yields the same tools on any machine. The pinned versions live in
-`flake.lock` (git, zsh, tmux, starship, neovim via home-manager, fzf, ripgrep,
-fd, wezterm). That removes the classic setup pain — "works on my machine" —
-because there is no machine-dependent apt install step; `nix develop` downloads
-exactly what the repo says, and the `❄` starship indicator confirms the sandbox
-is live. **home-manager** extends the same idea from packages to *files*: it
-generates `~/.zshrc`, the starship prompt, and the wezterm link from `home.nix`,
-so your dotfiles are the single source of truth for both tools *and* config.
+Config: `config/nvim/init.lua` → `~/.config/nvim/init.lua`. Plugins install on first launch via
+**lazy.nvim** (`:Lazy` to manage). Colorscheme: catppuccin-mocha.
+
+> ⚠️ Neovim itself isn't in `flake.nix` or `home.nix` (see section 15). `nvim --version` tells
+> you whether it's installed (e.g. via Linuxbrew).
+
+### Survival guide: modes
+
+| Mode | Enter with | What keys do |
+|---|---|---|
+| **Normal** | `Esc` | Keys are commands (move, delete, copy) |
+| **Insert** | `i` (before cursor), `a` (after), `o` (new line below) | Keys type text |
+| **Visual** | `v` (chars), `V` (lines), `Ctrl+V` (block) | Select, then act (`d`, `y`, `>`) |
+| **Command** | `:` | `:w` save, `:q` quit, `:wq`, `:q!` quit without saving |
+
+### Moving
+
+| Keys | Move |
+|---|---|
+| `h j k l` | Left, down, up, right |
+| `w` / `b` / `e` | Next word / back a word / end of word |
+| `0` / `^` / `$` | Line start / first non-blank / line end |
+| `gg` / `G` / `42G` | Top / bottom / line 42 |
+| `Ctrl+D` / `Ctrl+U` | Half-page down / up |
+| `%` | Jump to matching bracket |
+| `5j` | 5 lines down (relative line numbers show you the counts) |
+
+### Editing = operator + motion
+
+| Operator | + motion example | Result |
+|---|---|---|
+| `d` delete | `dw`, `d$`, `dd` (line) | |
+| `c` change | `ciw` (change inner word), `ci"` (inside quotes) | Deletes, then insert mode |
+| `y` yank (copy) | `yy` (line), `yiw` | |
+| `p` / `P` | | Paste after / before |
+| `.` | | Repeat the last change |
+| `u` / `Ctrl+R` | | Undo / redo (undo persists across restarts) |
+
+### Your keymaps
+
+The leader key is **not set** in `init.lua`, so it's Neovim's default **`\`** (backslash).
+
+| Keys | Action |
+|---|---|
+| `Ctrl+P` | Find files (fzf-lua) |
+| `Ctrl+G` | Grep across the project (fzf-lua) |
+| `\w` | Save |
+| `\q` | Quit |
+| `\e` | Show the diagnostic under the cursor |
+| `Esc` | Clear search highlight |
+| `\u` | *Undo tree, but the undotree plugin isn't installed, so this errors (section 15)* |
+
+### Search and replace
+
+`/word` search (smartcase), `n` / `N` next / previous, `*` search the word under the cursor,
+`:%s/old/new/g` replace all (`/gc` to confirm each).
+
+### Git inside nvim (vim-fugitive / rhubarb)
+
+`:Git` status window (`-` stage/unstage, `cc` commit, `=` inline diff), `:Git blame`,
+`:Gdiffsplit`, `:GBrowse` opens the current line on GitHub.
+
+### Windows and buffers
+
+`:vsp file` / `:sp file` split, `Ctrl+W h/j/k/l` move between splits, `:e file` open,
+`:ls` and `:b name` switch buffers, `:Ex` file browser.
+
+---
+
+## 11. vim
+
+Plain vim is the fallback editor (`EDITOR=vim`, so it's what `git commit` opens). Config:
+`config/vim/.vimrc`: relative numbers, 2-space indent, incremental + highlighted search,
+persistent undo, `scrolloff=8`, colorscheme `torte`. All the modes, motions and operators from
+section 10 work the same. There are no plugins or custom keymaps.
+
+**Writing a git commit message in vim:** press `i`, type the message, `Esc`, then `:wq`. To
+abort the commit, `:q!`.
+
+---
+
+## 12. Starship prompt
+
+There are **two** starship configs, and they both target the same file:
+
+- **`programs.starship` in `home.nix`** (minimal): home-manager writes it to
+  `~/.config/starship.toml`.
+- **`config/starship/starship.toml`** (powerline-style, with os/user/nix-shell/language
+  segments): `install.sh` symlinks this to the **same path**, `~/.config/starship.toml`.
+
+Whichever ran last wins. Check which one you have with `ls -l ~/.config/starship.toml` (a
+symlink into `dotfiles/config/` means the install.sh one). See section 15.
+
+### Reading the home.nix prompt
+
+```
+~/github/capstone main [!?] ⏱ 3s
+➜
+```
+
+| Part | Meaning |
+|---|---|
+| directory | Where you are |
+| branch + `[...]` | Git branch; `!` modified, `?` untracked, `+` staged, `⇡`/`⇣` ahead/behind |
+| `⏱ 3s` | How long the last command took (only shown when slow) |
+| `➜` purple / red | Last command succeeded / failed |
+
+The install.sh version adds the OS + username, a `❄` marker inside `nix develop`, and the
+active Node/Rust/Python versions.
+
+---
+
+## 13. Nix, home-manager and install.sh
+
+| Piece | Owns | Apply changes with |
+|---|---|---|
+| **Nix flake** (`flake.nix`, `flake.lock`) | Pinned tools for the dev shell | `nix develop` |
+| **home-manager** (`home.nix`) | zsh, starship, wezterm link, jq/htop/starship packages | `home-manager switch --flake .` |
+| **install.sh** | Symlinks for `config/*` (git, tmux, nvim, vim, ssh, starship, claude) | `./install.sh` |
+| **setup-claude-tools.sh** | Claude Code plugins + no-mistakes | `bash scripts/setup-claude-tools.sh` |
 
 ### Fresh WSL machine
 
 ```bash
-# 1. Install Determinate Nix
 curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install
-
-# 2. Clone the dotfiles
-cd ~
-git clone https://github.com/AdamDunn1437/dotfiles.git
-cd dotfiles
-
-# 3. Enter dev shell (downloads pinned tool versions)
+cd ~ && git clone https://github.com/AdamDunn1437/dotfiles.git && cd dotfiles
 nix develop
-
-# 4. Symlink config/ files into $HOME (backs up existing files as *.bak)
 ./install.sh
-
-# 5. Apply home-manager configs (zsh, starship, wezterm)
 home-manager switch --flake .
-
-# 6. Make zsh your login shell (optional)
-chsh -s "$(which zsh)"
+chsh -s "$(which zsh)"                              # optional
+curl -fsSL https://claude.ai/install.sh | bash      # Claude Code
+bash scripts/setup-claude-tools.sh
 ```
 
-### Day-to-day config update loop
+### Day-to-day update loop
 
 ```bash
 cd ~/github/AdamDunn1437/dotfiles
-
-git pull                                    # get latest configs
-nix develop                                 # enter tooling
-./install.sh                                # re-link config/* (git, tmux, nvim, vim, ssh)
-home-manager switch --flake .               # apply home.nix (zsh, starship, wezterm)
-tmux source-file ~/.tmux.conf               # reload tmux if relevant
+git pull
+./install.sh                     # re-link config/*
+home-manager switch --flake .    # if home.nix changed
+tmux source-file ~/.tmux.conf    # if tmux changed (or Ctrl-a r)
 ```
 
-### How `install.sh` works
+### How install.sh works
 
-- Maps each tool dir under `config/` to a home target:
-  `git`, `tmux`, `vim`, `ssh` → `$HOME` (with `ssh` → `~/.ssh`),
-  `nvim` → `~/.config/nvim`, `starship` → `~/.config`. (`zsh` is a no-op in
-  practice — zsh and starship are owned by home-manager.)
-- Creates **relative symlinks**; safe to run repeatedly.
-- Backs up any real file at the destination as `*.bak`, and deletes stale
-  symlinks before re-linking.
-- Hardens `~/.ssh` to `700` and `~/.ssh/config` to `600` afterwards.
+- Maps each folder in `config/` to a target: `git`, `tmux`, `vim` → `~`; `ssh` → `~/.ssh`;
+  `nvim` → `~/.config/nvim`; `starship` → `~/.config`; `claude` → `~/.claude`.
+- Creates relative symlinks; safe to re-run.
+- Backs up a real file at the destination as `*.bak` and replaces stale symlinks.
+- Locks down `~/.ssh` (700) and `~/.ssh/config` (600).
 
 ---
 
-## 9. Worked example: edit a config → apply → test → go back to original
+## 14. Worked example: edit → apply → test → revert
 
-This is the loop you'll do constantly: tweak a setting, live with it, and revert
-cleanly if it doesn't suit you. Because the dotfiles repo is a git repo and the
-configs are symlinked or generated from it, "go back to original" is always one
-command away.
+The repo is the source of truth: change the file in the repo, apply it, and use git to go back.
 
-**Scenario: try changing the tmux prefix from `Ctrl-a` back to `Ctrl-b`.** The
-steps are identical for any edit (prompt, keymaps in nvim, zsh aliases, a
-colorscheme), so follow along with whatever you're experimenting with.
-
-### Step 1 — check the current state before you touch anything
+**Scenario: try `Ctrl-b` as the tmux prefix.**
 
 ```bash
 cd ~/github/AdamDunn1437/dotfiles
-git status        # any pending local changes?
-git diff          # exactly what differs from the last commit
-git lg            # recent commit history, if you need an earlier "original"
+git st                                          # 1. start clean
+vim config/tmux/.tmux.conf                      # 2. set -g prefix C-a  →  set -g prefix C-b
+tmux source-file ~/.tmux.conf                   # 3. apply (inside tmux: the OLD prefix + r)
+                                                #    test: Ctrl-b c should open a window
 ```
 
-### Step 2 — make the edit
+Keep it:
 
 ```bash
-vim config/tmux/.tmux.conf
-# change:  set -g prefix C-a     →     set -g prefix C-b
+add config/tmux/.tmux.conf && commit -m "Try Ctrl-b prefix"
 ```
 
-### Step 3 — apply + test the change
+Or revert it:
 
 ```bash
-./install.sh                 # re-link symlinks (idempotent, safe to re-run)
-tmux source-file ~/.tmux.conf   # apply without restarting tmux
-# now try: the prefix should be Ctrl-b; splits still work, pane nav unchanged
+git restore config/tmux/.tmux.conf    # throw the edit away
+git stash / git stash pop             # or shelve it and bring it back later
+tmux source-file ~/.tmux.conf         # re-apply the original
 ```
 
-For home-manager-owned configs (zsh, starship, wezterm) the apply step is instead:
-
-```bash
-home-manager switch --flake .          # regenerate ~/.zshrc, prompt, wezterm link
-exec zsh                               # pick up shell changes immediately
-```
-
-### Step 4 — decide: keep it or revert it
-
-**Option A — keep the change** (and record it like any experiment):
-
-```bash
-git add config/tmux/.tmux.conf
-git commit -m "try Ctrl-b prefix"      # or use the `commit` zsh alias
-```
-
-**Option B — revert to the original** in 3 ways, pick your mood:
-
-```bash
-git restore config/tmux/.tmux.conf     # discard the edit entirely (permanent)
-git checkout -- config/tmux/.tmux.conf # older syntax, same result
-```
-
-If you only want to *shelve* it temporarily (compare against the original, then
-maybe bring it back):
-
-```bash
-git stash                              # put the edit away, tree back to original
-git stash pop                          # bring the edit back
-git stash list                         # see what's stashed
-```
-
-Verify you're back to original:
-
-```bash
-git status        # should be clean (empty)
-git diff          # no output = no difference from HEAD
-```
-
-**Step 5 — re-apply the config** after reverting (the file and the live config
-can get out of sync):
-
-```bash
-tmux source-file ~/.tmux.conf   # tmux: reload from the reverted file
-./install.sh                    # symlink tools: ensure links point at the reverted file
-home-manager switch --flake .   # home-manager tools: regenerate from reverted home.nix
-```
-
-### Reverting the other-way-around risks (what to watch for)
-
-| Situation | What to do |
+| Situation | Fix |
 |---|---|
-| `install.sh` backed up your real file as `.bak` | You can restore it: `mv ~/.tmux.conf.bak ~/.tmux.conf` (the repo file is the "original" here, so usually not needed) |
-| You edited the **generated** `~/.zshrc` directly | Pointless — it's rebuilt from `home.nix`. Cast the change in `home.nix` instead, or `git restore home.nix` |
-| You bumped tool versions and broke the build | `git restore flake.lock && git restore flake.nix`, then `nix develop` again |
-| You want to undo inside nvim while editing | `u` to undo, `:earlier 30m` to jump across saves (persistent undo), `<leader>u` for the undo tree |
-| You committed a bad change | `git revert <hash>` (creates an inverse commit) or `git reset --soft HEAD~1` to un-commit and keep the diff |
-
-> **Rule of thumb:** the repo — not the live symlink — is the source of truth.
-> Revert the file in the repo with git, then re-apply (Step 5). That keeps the
-> live config, the file, and git history in agreement.
+| `install.sh` backed up a real file | `mv ~/.tmux.conf.bak ~/.tmux.conf` (rarely needed) |
+| You edited the generated `~/.zshrc` | Pointless: change `home.nix` instead |
+| A flake update broke the build | `git restore flake.lock flake.nix`, then `nix develop` |
+| You committed a bad config | `git revert <hash>` |
 
 ---
 
-## Where each config lives
+## 15. Known gaps in the current configs
+
+Found while checking this sheet against the files. None of them breaks anything badly, but
+each is worth a ticket:
+
+| Gap | Effect | Fix |
+|---|---|---|
+| Neovim isn't in `flake.nix` or `home.nix` | A fresh machine has no `nvim` | Add `neovim` to `home.packages` |
+| `mapleader` is never set | Leader is `\`, not Space | Add `vim.g.mapleader = " "` **before** `require("lazy")` |
+| `\u` calls `UndotreeToggle`, but undotree isn't installed | Pressing it errors | Add `"mbbill/undotree"` to the lazy spec, or delete the mapping |
+| lualine is listed with no `setup()` / `opts` | The statusline plugin likely never activates | Use `{ "nvim-lualine/lualine.nvim", opts = {} }` |
+| treesitter has no parsers configured | Highlighting is mostly the default | Add `opts = { ensure_installed = {...}, highlight = { enable = true } }` |
+| Two starship configs both target `~/.config/starship.toml` | Which prompt you get depends on run order | Keep one: delete `config/starship/` or `programs.starship` |
+| `.tmux.conf` comment says "Shift + arrow" resize | Misleading comment; the keys are `Alt+h/j/k/l` | Fix the comment |
+| `diff` alias shadows the system `diff` | `diff a b` runs `git diff` | Rename to `gdiff`, or live with `command diff` |
+
+---
+
+## 16. Where each config lives
 
 | What | File | Applied by |
 |---|---|---|
-| Dev shell tooling | `flake.nix` | `nix develop` |
-| zsh | `home.nix` | `home-manager switch --flake .` |
-| Starship prompt | `home.nix` | home-manager |
+| Dev shell tools | `flake.nix` | `nix develop` |
+| zsh + aliases | `home.nix` | `home-manager switch --flake .` |
+| Starship prompt | `home.nix` **and** `config/starship/starship.toml` (see 12) | home-manager / `./install.sh` |
 | WezTerm | `home/.config/wezterm/wezterm.lua` | home-manager |
-| tmux | `config/tmux/.tmux.conf` | `./install.sh` |
+| tmux | `config/tmux/.tmux.conf` | `./install.sh`, then `Ctrl-a r` |
 | Neovim | `config/nvim/init.lua` | `./install.sh` |
-| Git | `config/git/.gitconfig`, `.gitignore_global` | `./install.sh` |
 | vim | `config/vim/.vimrc` | `./install.sh` |
+| Git | `config/git/.gitconfig`, `.gitignore_global` | `./install.sh` |
 | SSH | `config/ssh/config` | `./install.sh` |
+| Claude Code global rules | `config/claude/CLAUDE.md` | `./install.sh` |
+| explain-back skill | `config/claude/skills/explain-back/SKILL.md` | `./install.sh` |
+| Claude plugins + no-mistakes | `scripts/setup-claude-tools.sh` | `bash scripts/setup-claude-tools.sh` |
