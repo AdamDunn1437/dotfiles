@@ -16,10 +16,20 @@
 
   home.sessionPath = [ "$HOME/.local/bin" ];
 
+  # Everyday CLI tools, available in every repo (no `nix develop` needed).
+  # zsh is installed by programs.zsh below.
   home.packages = with pkgs; [
+    git
+    vim
+    neovim
+    tmux
+    starship
+    fzf
+    ripgrep
+    fd
+    wezterm
     jq
     htop
-    starship
   ];
 
   programs.zsh = {
