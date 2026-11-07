@@ -18,6 +18,7 @@ TARGETS[nvim]="$HOME/.config/nvim"
 TARGETS[starship]="$HOME/.config"
 TARGETS[vim]="$HOME"
 TARGETS[ssh]="$HOME/.ssh"
+TARGETS[claude]="$HOME/.claude"
 
 link_file() {
   local src="$1"

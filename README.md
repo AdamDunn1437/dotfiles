@@ -44,6 +44,7 @@ home-manager switch --flake .
 | `config/vim/.vimrc` | install.sh | Basic vim settings |
 | `config/starship/starship.toml` | install.sh | Starship prompt — minimal preset |
 | `config/ssh/config` | install.sh | SSH config template (commented out) |
+| `config/claude/CLAUDE.md` | install.sh | Global Claude Code instructions linked to `~/.claude/CLAUDE.md` (re-entry, design interview, TDD, plan-compact-build) |
 | `.gitignore` | — | Ignores editor swap files, OS cruft, Nix build artifacts |
 
 ## Fresh WSL install
