@@ -22,16 +22,10 @@
       devShells.default = (pkgsFor system).mkShell {
         name = "dotfiles-dev";
 
-        packages = with pkgsFor system; [
-          git
-          zsh
-          vim
-          tmux
-          starship
-          fzf
-          ripgrep
-          fd
-          wezterm
+        # Bootstrap only: everyday tools now live in home.packages (home.nix),
+        # so they're available in every repo without `nix develop`.
+        packages = [
+          home-manager.packages.${system}.default
         ];
 
         shellHook = ''
@@ -43,18 +37,11 @@
             unset _nix_path
           fi
 
-          echo "✦ dotfiles dev shell activated"
-          echo "  git:      $(git --version 2>/dev/null)"
-          echo "  zsh:      $(zsh --version 2>/dev/null)"
-          echo "  vim:      $(vim --version 2>/dev/null | head -1)"
-          echo "  tmux:     $(tmux -V 2>/dev/null)"
-          echo "  wezterm:  $(wezterm --version 2>/dev/null)"
-          echo "  starship: $(starship --version 2>/dev/null | head -1)"
-          echo "  fzf:      $(fzf --version 2>/dev/null)"
-          echo "  rg:       $(rg --version 2>/dev/null | head -1)"
-          echo "  fd:       $(fd --version 2>/dev/null)"
+          echo "✦ dotfiles bootstrap shell"
+          echo "  home-manager: $(home-manager --version 2>/dev/null)"
           echo ""
-          echo "Run ./install.sh to symlink config files into \$HOME"
+          echo "Everyday tools come from home.packages in home.nix. To apply:"
+          echo "  ./install.sh && home-manager switch --flake ."
         '';
       };
     }))

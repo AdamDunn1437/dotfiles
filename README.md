@@ -18,7 +18,7 @@ tooling, **home-manager** for shell/config management, and a simple
 ## Quick start
 
 ```bash
-# Enter the dev shell (downloads pinned tools)
+# Bootstrap shell (provides the home-manager CLI on a fresh machine)
 nix develop
 
 # Symlink config/* files into $HOME (backs up existing files)
@@ -32,9 +32,9 @@ home-manager switch --flake .
 
 | File / dir | Managed by | Purpose |
 |---|---|---|
-| `flake.nix` | Nix | Pins nixpkgs + home-manager; defines dev shell and home config |
+| `flake.nix` | Nix | Pins nixpkgs + home-manager; defines the bootstrap shell and home config |
 | `flake.lock` | Nix | Auto-generated lockfile for exact nixpkgs revision |
-| `home.nix` | home-manager | Home-manager module — zsh, starship, wezterm configs |
+| `home.nix` | home-manager | Home-manager module — everyday CLI tools (`home.packages`) plus zsh, starship, wezterm configs |
 | `home/.config/wezterm/wezterm.lua` | home-manager | Wezterm config (out-of-store symlink via `mkOutOfStoreSymlink`) |
 | `install.sh` | — | Symlinks files under `config/` into `$HOME`; backs up existing |
 | `config/git/.gitconfig` | install.sh | Git config — colors, aliases |
@@ -60,7 +60,7 @@ cd ~
 git clone https://github.com/AdamDunn1437/dotfiles.git
 cd dotfiles
 
-# 3. Enter dev shell & symlink configs
+# 3. Enter the bootstrap shell (for the home-manager CLI) & symlink configs
 nix develop
 ./install.sh
 
