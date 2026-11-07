@@ -42,7 +42,6 @@ home-manager switch --flake .
 | `config/tmux/.tmux.conf` | install.sh | Tmux config — Ctrl-a prefix, mouse mode, vi navigation |
 | `config/nvim/init.lua` | install.sh | Neovim config — lazy.nvim bootstrap, basic options, keymaps |
 | `config/vim/.vimrc` | install.sh | Basic vim settings |
-| `config/starship/starship.toml` | install.sh | Starship prompt — minimal preset |
 | `config/ssh/config` | install.sh | SSH config template (commented out) |
 | `config/claude/CLAUDE.md` | install.sh | Global Claude Code instructions linked to `~/.claude/CLAUDE.md` (re-entry, design interview, TDD, plan-compact-build) |
 | `config/claude/skills/explain-back/SKILL.md` | install.sh | Custom skill: quizzes me on a change before merge → `~/.claude/skills/explain-back/` |
