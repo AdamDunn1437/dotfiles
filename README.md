@@ -45,6 +45,8 @@ home-manager switch --flake .
 | `config/starship/starship.toml` | install.sh | Starship prompt — minimal preset |
 | `config/ssh/config` | install.sh | SSH config template (commented out) |
 | `config/claude/CLAUDE.md` | install.sh | Global Claude Code instructions linked to `~/.claude/CLAUDE.md` (re-entry, design interview, TDD, plan-compact-build) |
+| `config/claude/skills/explain-back/SKILL.md` | install.sh | Custom skill: quizzes me on a change before merge → `~/.claude/skills/explain-back/` |
+| `scripts/setup-claude-tools.sh` | — | Run `bash scripts/setup-claude-tools.sh` once: installs mattpocock-skills + pr-review-toolkit plugins and the no-mistakes push gate |
 | `.gitignore` | — | Ignores editor swap files, OS cruft, Nix build artifacts |
 
 ## Fresh WSL install
